@@ -1,0 +1,60 @@
+name: Gateway checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Scan the complete Git index without exposing matched values
+        run: node scripts/scan-secrets.mjs --staged
+      - name: Validate release tag before building
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const version = readFileSync("internal/buildinfo/version.txt", "utf8").trim();
+            if (process.env.RELEASE_TAG !== `v${version}`) throw new Error("Tag must equal v + internal/buildinfo/version.txt");
+          '
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build ARM64 binary and provenance
+        run: node scripts/build.mjs
+      - name: Check source and deployment syntax
+        run: bash scripts/check-linux.sh
+      - name: Package allowlisted files and verify clean build provenance
+        run: |
+          args=(--require-clean --expected-commit "$GITHUB_SHA")
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            args+=(--tag "$GITHUB_REF_NAME")
+          fi
+          node scripts/package-release.mjs "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gateway-linux-arm64-release
+          path: |
+            dist/packages/gateway-*-linux-arm64.tar.gz
+            dist/packages/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7

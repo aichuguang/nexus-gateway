@@ -1,0 +1,30 @@
+# Legacy in-place upgrade only; new installations use gateway.service.
+[Unit]
+Description=W103D Gateway public entry manager
+Wants=network-online.target w103d-gateway-proxy.service
+After=network-online.target easytier@default.service w103d-gateway-proxy.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/default/w103d-gateway
+ExecStart=/opt/w103d-gateway/w103d-gateway serve --listen ${MANAGEMENT_LISTEN} --gateway-ip ${GATEWAY_IP} --certd-url ${CERTD_URL} --data-dir ${DATA_DIR} --nginx ${NGINX_BIN}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/w103d-gateway /var/cache/w103d-gateway
+# Read-only IPv6 address/route discovery via iproute2 requires NETLINK_ROUTE.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

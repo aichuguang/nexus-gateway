@@ -1,0 +1,21 @@
+# Managed by Gateway: traffic logging.
+# maxsize is checked when logrotate runs; it is not a hard real-time size cap.
+/var/lib/gateway/traffic.log {
+    daily
+    maxsize 10M
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d-%H%M%S
+    su root root
+    create 0600 root root
+    sharedscripts
+    postrotate
+        if /usr/bin/systemctl is-active --quiet gateway-proxy.service; then
+            /usr/bin/systemctl kill --kill-whom=main --signal=USR1 gateway-proxy.service >/dev/null 2>&1 || true
+        fi
+    endscript
+}

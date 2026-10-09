@@ -1,0 +1,29 @@
+[Unit]
+Description=Gateway public entry manager
+Wants=network-online.target gateway-proxy.service
+After=network-online.target easytier@default.service gateway-proxy.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/default/gateway
+ExecStart=/opt/gateway/gateway serve --listen ${MANAGEMENT_LISTEN} --gateway-ip ${GATEWAY_IP} --certd-url ${CERTD_URL} --data-dir ${DATA_DIR} --nginx ${NGINX_BIN}
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/gateway /var/cache/gateway
+# Read-only IPv6 address/route discovery via iproute2 requires NETLINK_ROUTE.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

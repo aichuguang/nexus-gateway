@@ -1,0 +1,61 @@
+name: Gateway release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # No checkout, build, package script or dependency install runs with write permission.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: gateway-linux-arm64-release
+          path: release
+      - name: Verify the exact release attachments
+        working-directory: release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]
+          archive="gateway-${RELEASE_TAG#v}-linux-arm64.tar.gz"
+          [[ -f "$archive" && ! -L "$archive" && -f SHA256SUMS && ! -L SHA256SUMS ]]
+          [[ "$(find . -mindepth 1 -maxdepth 1 | wc -l)" -eq 2 ]]
+          [[ "$(wc -l < SHA256SUMS)" -eq 1 ]]
+          [[ "$(cat SHA256SUMS)" == "$(sha256sum "$archive")" ]]
+          sha256sum --strict -c SHA256SUMS
+      - name: Create a draft GitHub Release without overwriting existing assets
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo 'A release already exists for this tag; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          archive="gateway-${RELEASE_TAG#v}-linux-arm64.tar.gz"
+          notes="Linux ARM64 build from GitHub Actions. Verify SHA256SUMS, extract the archive, then verify its inner SHA256SUMS before following the repository deployment guide. Build provenance is recorded in build-manifest.json. CI checks do not substitute for validation on your device or cloud accounts. This draft requires a maintainer review of the license, source and deployment instructions before publication."
+          args=(--repo "$GH_REPO" --verify-tag --draft --title "$RELEASE_TAG" --notes "$notes")
+          if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "${args[@]}" "$archive" SHA256SUMS
