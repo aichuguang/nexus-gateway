@@ -122,24 +122,51 @@ node scripts/package-release.mjs \
 
 该工作流只构建和发行软件，不连接部署设备，也不需要 DNS/CDN 或其他生产凭据。
 
-### 仓库设置
+### 首次开启工作流
 
-- 在 **Settings → Actions → General** 允许工作流使用所需 Actions，并允许发行任务申请 `contents: write`。
-- 为默认分支设置保护规则与必需检查，将发行 tag 的创建权限限定给维护者。
-- 在仓库支持时启用 Secret scanning / Push protection；提交检查也包含项目自带扫描器。
+仓库已经包含打包和发行工作流，**不用点击 New workflow，也不用重新创建 YAML 文件**。使用有仓库管理权限的账号完成以下检查：
+
+1. 打开仓库 **Settings → Actions → General**。
+2. 在 **Actions permissions** 中允许工作流使用 GitHub 官方的 `actions/*`。简单配置可选择 **Allow all actions and reusable workflows**，然后点击 **Save**；采用限制名单时，允许 GitHub 官方 Actions 即可。若设置被组织策略锁定，需要组织管理员调整。
+3. **Workflow permissions** 可以保留默认只读。现有工作流已单独为最终发行任务声明 `contents: write`，无需把所有工作流改为读写，也无需勾选允许 Actions 创建或审批 Pull Request。
+4. 打开仓库顶部 **Actions**。若看到禁用提示，点击启用工作流的按钮；从 Fork 创建的仓库可能显示 **I understand my workflows, go ahead and enable them**。工作流已处于启用状态时，不需要重复启用。
+5. 如果某个工作流被单独禁用，在左侧选择它并点击 **Enable workflow**。
+
+整个流程使用 GitHub 自动提供的短期 `GITHUB_TOKEN`，**不需要创建 PAT，也不需要添加 Repository secrets**。若组织策略禁止发行任务获得写权限，需管理员允许该任务写入仓库内容。
+
+建议另外为默认分支设置保护规则与必需检查，将发行 tag 的创建权限限定给维护者；在仓库支持时启用 Secret scanning / Push protection。提交检查也包含项目自带扫描器。
+
+### 手动打包与下载
+
+不创建 tag、只想先拿到构建包时：
+
+1. 打开 **Actions → Gateway checks → Run workflow**。
+2. 在 **Use workflow from** 选择包含最新代码的分支，当前仓库默认分支为 `master`，再点击 **Run workflow**。
+3. 等待运行成功，打开这次运行的详情页，在 **Artifacts** 下载 `gateway-linux-arm64-release`。下载通常要求登录 GitHub。
+4. 解开 artifact 的外层 ZIP 后，可得到发行包 `.tar.gz` 和 `SHA256SUMS`；它们的使用方式与本文前面的发行包说明相同。Actions artifact 保留 7 天，长期分发使用 GitHub Release。
+
+看不到 **Run workflow** 时，先确认有仓库写入权限、默认分支包含 `check.yml`，且该文件保留 `workflow_dispatch`。`Gateway release` 只响应 tag push，没有手动运行按钮；首次推送匹配的 tag 前，它可能还未显示在 Actions 列表中，这不代表要另外创建工作流。
+
+**仅在本地创建 tag 不会触发 GitHub Actions；必须在启用之后推送 tag。** 启用 Actions 不会自动补跑禁用期间已经发生的 tag push。
 
 ## 6. 发布版本
 
 1. 更新 `internal/buildinfo/version.txt`，说明功能变化、兼容性、配置与 schema 影响，并同步相关文档。
 2. 提交改动，确认分支 CI 通过；核对 [许可证](../LICENSE)、[第三方声明](../THIRD_PARTY_NOTICES.md) 及安装/升级说明。
-3. 对选定提交创建并推送与版本完全一致的 tag，例如：
+3. 对选定的干净提交创建与版本完全一致的本地 tag，例如：
 
    ```bash
    git tag -a v0.8.0-dev -m "Gateway 0.8.0-dev"
+   ```
+
+   确认 Actions 已启用，并明确同意远程推送后，再推送分支和 tag。以下示例使用本仓库默认分支 `master`，不会推送其他本地 tag：
+
+   ```bash
+   git push origin master
    git push origin v0.8.0-dev
    ```
 
-4. 等待 Actions 生成草稿 Release，补充变更说明、适用平台、已知问题及升级注意事项。
+4. 在 **Actions → Gateway release** 查看这次 tag 运行；成功后到仓库 **Releases** 查看草稿，补充变更说明、适用平台、已知问题及升级注意事项。草稿只对有相应仓库权限的维护者可见，不会自动公开发布，也不会部署到设备。
 5. 检查附件、校验清单和构建身份，并在匹配平台验证安装或升级路径。
 6. 点击 **Publish release** 对外发布。带 `-` 后缀的版本由工作流标记为 prerelease。
 
@@ -147,6 +174,9 @@ node scripts/package-release.mjs \
 
 | 现象 | 检查方向 |
 | --- | --- |
+| Actions 页面没有发行工作流 | `Gateway checks` 可手动打包；`Gateway release` 在首次匹配 tag push 后再检查，无需创建重复工作流 |
+| 本地打 tag 后没有运行 | `git tag` 只操作本地；确认已启用 Actions 并推送这个 tag，启用不会补跑旧事件 |
+| 找不到下载入口 | 临时构建在运行详情页的 Artifacts；tag 构建另生成草稿 Release，需登录维护者账号查看 |
 | 下载 404 | 仓库、tag、资产名称是否正确，Release 是否已公开 |
 | tag 校验失败 | tag 是否严格等于 `v` 加版本文件内容 |
 | 敏感信息扫描失败 | 按脱敏路径与规则检查文件；实际密钥需移除并撤销，不通过整体排除目录规避检查 |
